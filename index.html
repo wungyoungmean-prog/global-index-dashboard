@@ -413,7 +413,7 @@ function mountNative(host,index,range,usePercentage){
 window.addEventListener('resize',()=>{
   for(const chart of document.querySelectorAll('.nativeChart')){
     const values=nativeTargets.get(chart);
-    if(values)drawCloses(values,chart);
+    if(values)drawCloses(values,chart,null,chart.hasAttribute('data-points-only'));
   }
 });
 startNativeData().finally(()=>{refreshReturnFrequency();mountCharts($('markets'),'1M');render()});
@@ -590,15 +590,22 @@ function mountCandleRange(host,index){
   host.innerHTML='<form class="candleRangeForm"><div class="brushControls"><label>数据<select name="dataset" aria-label="区间数据来源">'+
     (hasFeed?'<option value="feed">站内日收盘价</option>':'')+(recent?'<option value="recent">'+recent.label+'</option>':'')+(archive?'<option value="history">'+archive.label+'</option>':'')+
     '<option value="csv">本机日线 CSV</option></select></label><label>开始<input name="from" required></label><label>结束<input name="to" required></label><button type="submit">计算涨跌幅</button></div>'+
-    '<label class="candleFile" hidden>导入 Date、Close 文件 <input type="file" accept=".csv,text/csv" aria-label="导入区间收盘价"></label><p class="brushHint" data-candle-coverage></p><div class="brushResult" role="status" data-candle-result></div></form>';
+    '<label class="candleFile" hidden>导入 Date、Close 文件 <input type="file" accept=".csv,text/csv" aria-label="导入区间收盘价"></label><p class="brushHint" data-candle-coverage></p><div class="brushResult" role="status" data-candle-result></div><canvas class="nativeChart" role="img" aria-label="自选区间收盘走势" hidden></canvas></form>';
   const form=host.querySelector('form');
   const {dataset:source,from,to}=form.elements;
   const fileField=host.querySelector('.candleFile'),file=fileField.querySelector('input');
   const status=host.querySelector('[data-candle-result]'),coverage=host.querySelector('[data-candle-coverage]');
+  const chart=host.querySelector('canvas');
   let revision=0;
   if(importedCloses.has(key))source.value='csv';
-  function configure(){
+  function clearResult(){
     revision++;
+    status.replaceChildren();
+    chart.hidden=true;
+    nativeTargets.delete(chart);
+  }
+  function configure(){
+    clearResult();
     const mode=source.value,series=mode==='history'?archive:mode==='recent'?recent:null;
     const rows=series?.rows||(mode==='csv'?importedCloses.get(key):null);
     const monthly=series?.monthly;
@@ -613,10 +620,9 @@ function mountCandleRange(host,index){
     coverage.textContent=rows?'可用数据 '+dateAt(rows[0][0])+' 至 '+dateAt(end)+' · '+rows.length+' 个观测值':mode==='feed'?'使用区间内首末交易日收盘价。':'选择同一指数的日收盘价文件。';
     if(series?.source)coverage.insertAdjacentHTML('beforeend',' · '+sourceLink(series.source,'数据来源 ↗'));
     if(mode==='csv'&&index===1)coverage.insertAdjacentHTML('beforeend',' · '+sourceLink('https://fred.stlouisfed.org/series/NASDAQ100','纳指 100 日线下载页 ↗'));
-    status.replaceChildren();
   }
   source.addEventListener('change',configure);
-  for(const input of [from,to])input.addEventListener('input',()=>{revision++;status.replaceChildren()});
+  for(const input of [from,to])input.addEventListener('input',clearResult);
   file.addEventListener('change',async()=>{
     const input=file.files[0];
     const request=++revision;
@@ -632,6 +638,7 @@ function mountCandleRange(host,index){
   });
   form.addEventListener('submit',async event=>{
     event.preventDefault();
+    clearResult();
     const request=++revision,mode=source.value;
     const fromValue=from.value,toValue=to.value;
     const series=mode==='history'?archive:mode==='recent'?recent:null;
@@ -659,6 +666,11 @@ function mountCandleRange(host,index){
       const endpoints=document.createElement('span');
       endpoints.textContent=dateAt(first)+' · '+fmtPoints.format(a)+' → '+dateAt(last)+' · '+fmtPoints.format(b)+(rebased?' · 复算基准值':' 点')+' · '+selected.length+' 个观测';
       status.replaceChildren(percent,endpoints);
+      chart.hidden=false;
+      const pointsOnly=mode==='recent'||Boolean(series?.gaps);
+      chart.toggleAttribute('data-points-only',pointsOnly);
+      nativeTargets.set(chart,selected);
+      drawCloses(selected,chart,null,pointsOnly);
     }catch(error){if(request===revision)status.textContent=error.message}
   });
   configure();
